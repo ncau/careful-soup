@@ -20,6 +20,11 @@
 "use strict";
 
 const rhea = require("rhea");
+const opentracing = require('opentracing');
+
+const tracingReq = require('./tracing')
+const tracing = new tracingReq.createTracer('server')
+
 
 const amqp_host = process.env.MESSAGING_SERVICE_HOST || "localhost";
 const amqp_port = process.env.MESSAGING_SERVICE_PORT || 5672;
@@ -37,8 +42,8 @@ function process_request(request) {
 }
 
 container.on("connection_open", (event) => {
+    opentracing.globalTracer().activeSpan = opentracing.globalTracer.activeSpan.startSpan('server')
     console.log("BACKEND: Connection opened");
-
     event.connection.open_receiver("careful-soup/requests");
 });
 
@@ -47,9 +52,10 @@ container.on("receiver_open", (event) => {
 });
 
 container.on("message", (event) => {
+    console.log(event.message.message_annotations)
+    let span = tracing.tracer.startSpan('process-request', { childOf: opentracing.globalTracer().activeSpan})
     let request = event.message;
     let response_body;
-
     console.log("BACKEND: Received request '%s'", request.body);
 
     try {
@@ -70,6 +76,8 @@ container.on("message", (event) => {
     event.connection.send(response);
 
     requests_processed++;
+    span.finish();
+
 });
 
 container.connect({
